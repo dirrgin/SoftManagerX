@@ -6,7 +6,8 @@ from manager import \
     receive_twin_reported, \
     twin_desired, \
     clear_desired_twin,\
-    asyncio
+     asyncio,\
+    BlobServiceClient, monitor_blob_container
 
 load_dotenv()
 
@@ -18,7 +19,8 @@ async def main():
  
     registry_manager = IoTHubRegistryManager(CONNECTION_STRING_MANAGER)
     await clear_desired_twin(registry_manager, DEVICE_ID)
-    inKey=1
+    blob_service_client = BlobServiceClient.from_connection_string(BLOB_CONNECTION_STRING)
+    
     try:
         while True:
             # valid_choice = False
