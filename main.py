@@ -1,5 +1,6 @@
 import sys
-import time
+import os
+from dotenv import load_dotenv
 from manager import \
     IoTHubRegistryManager, \
     receive_twin_reported, \
@@ -7,11 +8,14 @@ from manager import \
     clear_desired_twin,\
     asyncio
 
+load_dotenv()
 
+BLOB_CONNECTION_STRING = os.getenv("BLOB_CONNECTION_STRING")
+CONNECTION_STRING_MANAGER = os.getenv("CONNECTION_STRING_MANAGER")
+DEVICE_ID = os.getenv("DEVICE_ID")
+BLOB_CONTAINER_NAME = "production-rate"
 async def main():
-    CONNECTION_STRING_MANAGER = "HostName=Cirencester-End.azure-devices.net;SharedAccessKeyName=iothubowner;SharedAccessKey=4THcWqn7NQdn21nYhOcsUm6iWCa3Z4knLAIoTDcDVKI="
-    DEVICE_ID = "demo_device1"
-
+ 
     registry_manager = IoTHubRegistryManager(CONNECTION_STRING_MANAGER)
     await clear_desired_twin(registry_manager, DEVICE_ID)
     inKey=1
