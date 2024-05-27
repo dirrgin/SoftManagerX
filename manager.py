@@ -1,20 +1,23 @@
-import asyncio
+import asyncio, logging, json, os
+from dotenv import load_dotenv
 from azure.iot.hub import IoTHubRegistryManager
 from azure.iot.hub.models import Twin, TwinProperties, CloudToDeviceMethod
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+load_dotenv()
+DEVICE_ID = os.getenv("DEVICE_ID")
 async def receive_twin_reported(manager_client, device_id):
     twin = manager_client.get_twin(device_id)
     rep = twin.properties.reported
-    print("Twin reported:")
+    print("\tTwin reported:")
     print(rep)
     return rep
 
 async def twin_desired(manager_client, device_id, reported):
     desired_twin = {}
 
-    del reported["$metadata"]
-    del reported["$version"]
-
+    reported.pop("$metadata", None)
+    reported.pop("$version", None)
+    
     for key, value in reported.items():
         desired_twin[key] = {"ProductionRate": value["ProductionRate"]}
 
@@ -32,36 +35,14 @@ async def clear_desired_twin(manager, device_id):
     twin_patch = Twin(properties=TwinProperties(desired=des))
     twin = manager.update_twin(device_id, twin_patch, twin.etag)
     print("desired prop were just cleaned")
+
 # Function to read the content of a blob asynchronously
 async def read_blob_content(blob_client):
-    stream = await blob_client.download_blob()
-    blob_data = await stream.readall()
+    stream = blob_client.download_blob()
+    blob_data = stream.readall()
     return blob_data.decode('utf-8')
 
-# Function to process newly appended data
-async def process_data(new_data, iot_registry_manager):
-    json_lines = new_data.splitlines()
-    for line in json_lines:
-        data = json.loads(line)
-        device_name = data['DeviceName']
-        dev_num = device_name.split()[-1]  # assuming 'Device X' format
-        method_name = "emergency_stop"
-        payload = {"DeviceName": dev_num}
-
-        # Create the method payload
-        method = CloudToDeviceMethod(
-            method_name=method_name,
-            payload=json.dumps(payload),
-            connect_timeout_in_seconds=10,
-            response_timeout_in_seconds=10
-        )
-
-        # Invoke direct method on the device
-        response = await iot_registry_manager.invoke_device_method(device_name, method)
-        logging.info(f"Direct method response: {response}")
-
-
-async def monitor_blob_container(blob_service_client, container_name):
+async def monitor_blob_container(blob_service_client, container_name, iot_registry_manager):
     container_client = blob_service_client.get_container_client(container_name)
     
     # Keep track of the last processed blob and its length
@@ -82,11 +63,19 @@ async def monitor_blob_container(blob_service_client, container_name):
             # If it's the first time processing this blob, or if it has grown, process new data
             if blob.name != last_blob_name or len(blob_content) > last_blob_length:
                 new_data = blob_content[last_blob_length:]  # Only process new content
-                await process_data(new_data)
-                
-                # Update the last processed blob and its length
+                if container_name == "production-rate":
+                    json_lines = new_data.splitlines()
+                    updated_devices = {}
+                    # Process each JSON line
+                    for line in json_lines:
+                        data = json.loads(line)  # Parse the JSON line into a dictionary
+                        prod_rate = data['ProductionRate'] - 10
+                        if prod_rate < 0:
+                            prod_rate = 0
+                        updated_devices[data['DeviceName']] = {"ProductionRate": prod_rate}
+                    await twin_desired(iot_registry_manager, DEVICE_ID, updated_devices)
+               
                 last_blob_name = blob.name
                 last_blob_length = len(blob_content)
         
-        # Wait before checking again (adjust the interval as needed)
-        await asyncio.sleep(60)
+        
