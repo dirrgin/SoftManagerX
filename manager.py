@@ -1,4 +1,5 @@
-import asyncio, logging, json, os
+import asyncio, logging, json, os, aiohttp
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from azure.iot.hub import IoTHubRegistryManager
 from azure.iot.hub.models import Twin, TwinProperties, CloudToDeviceMethod
@@ -31,36 +32,87 @@ async def clear_desired_twin(manager, device_id):
     twin = manager.update_twin(device_id, twin_patch, twin.etag)
     print("desired prop were just cleaned")
 
+async def run_res_error(registry_manager, device_name):
+    reset_method = CloudToDeviceMethod(method_name="reset_err_status", payload=device_name, response_timeout_in_seconds=14)
+    registry_manager.invoke_device_method(DEVICE_ID, reset_method)
+
 async def read_blob_content(blob_client):
     downloader =  blob_client.download_blob()
     return downloader.readall().decode('utf-8')
 
-async def get_most_recent_blob(container_client, last_processed_name, last_processed_time):
-    blobs = container_client.list_blobs()
-    # Sort blobs by last_modified attribute, most recent first
-    sorted_blobs = sorted(blobs, key=lambda blob: blob['last_modified'], reverse=True)
-    for blob in sorted_blobs:
-        if (blob.name != last_processed_name) and (blob['last_modified'].replace(tzinfo=None) > last_processed_time):
-            return blob
-    return None
+async def read_new_lines_from_blob(container_client, blob_name, last_position):
+    try:
+        blob_client = container_client.get_blob_client(blob_name)
+        # Read the blob from the last read position to the end
+        blob_properties =  blob_client.get_blob_properties()
+        new_length = blob_properties.size
+        new_lines_data = []
+        if new_length > last_position:
+            blob_data =  blob_client.download_blob(offset=last_position, length=new_length-last_position)
+            new_lines =  blob_data.readall()
+            last_position = new_length
+            new_lines_str = new_lines.decode('utf-8').strip().split('\n')
+            for line in new_lines_str:
+                json_data = json.loads(line)
+                new_lines_data.append(json_data)
+        return new_lines_data, last_position
+    except Exception as e:
+        print(f"An error occurred while reading new lines from blob: {e}")
+        return [], last_position
 
+# async def get_most_recent_blob(container_client, last_processed_name, last_processed_time):
+#     try:
+#         blobs = container_client.list_blobs()
+#         # Sort blobs by last_modified attribute, most recent first
+#         sorted_blobs = sorted(blobs, key=lambda blob: blob['last_modified'], reverse=True)
+#         # Get the current time
+#         current_time = datetime.now(datetime.UTC)
+#         print("the time is ", current_time)
+#         for blob in sorted_blobs:
+#             if (blob.name != last_processed_name 
+#                 and blob['last_modified'].replace(tzinfo=None) > last_processed_time 
+#                 and current_time - blob['last_modified'].replace(tzinfo=None) <= timedelta(hours=1)):
+#                 return blob
+#     except Exception as recent_blob:
+#         print(f"recent_blob exception: {recent_blob}")
+#     return None
+async def get_most_recent_blob(container_client, last_processed_name, last_processed_time, last_read_positions):
+    try:
+        blobs = container_client.list_blobs()
+        # Sort blobs by last_modified attribute, most recent first
+        sorted_blobs = sorted(blobs, key=lambda blob: blob['last_modified'], reverse=True)
+        
+        # Get the current time
+        current_time = datetime.utcnow()
 
-async def process_blob(blob, registry_manager, twin_reported, container_client):
-    blob_client = container_client.get_blob_client(blob.name)
-    new_data = await read_blob_content(blob_client)
+        for blob in sorted_blobs:
+            # if (blob.name != last_processed_name 
+            #     and blob['last_modified'].replace(tzinfo=None) > last_processed_time 
+            #     and current_time - blob['last_modified'].replace(tzinfo=None) <= timedelta(hours=1)):
+            if (blob.name != last_processed_name 
+                and blob['last_modified'].replace(tzinfo=None) > last_processed_time):  
+                print(blob.name)  
+                last_position = last_read_positions.get(blob.name, 0)
+                new_data, last_position = await read_new_lines_from_blob(container_client, blob.name, last_position)
 
+                # Update last read positions
+                last_read_positions[blob.name] = last_position
+                return new_data, blob.name, blob['last_modified'], last_read_positions
+
+    except Exception as e:
+        print(f"recent_blob exception: {e}")
+
+    return None, last_processed_name, last_processed_time, last_read_positions
+
+async def process_production(registry_manager, twin_reported, new_data):
     # Process new data
     # new_data = blob_content 
     twin_reported.pop("$metadata", None)
     twin_reported.pop("$version", None)
-    json_lines = new_data.splitlines()
-
     # Process each JSON line
     for line in json_lines:
         data = json.loads(line)  # Parse the JSON line into a dictionary
         prod_rate = data['ProductionRate'] - 10
-        print(data)
-        print("its new PR: ", prod_rate)
         formatted_key = data['DeviceName'].replace(" ", "")  # Remove spaces from the key
         if prod_rate < 0:
             prod_rate = 0
@@ -68,6 +120,34 @@ async def process_blob(blob, registry_manager, twin_reported, container_client):
         twin = registry_manager.get_twin(DEVICE_ID)
         twin_patch = Twin(properties=TwinProperties(desired=twin_reported))
         twin = registry_manager.update_twin(DEVICE_ID, twin_patch, twin.etag)
+    except KeyError as key_err:
+        print(f"Key error: {str(key_err)} in line: {line}")
     return blob.name, blob['last_modified'].replace(tzinfo=None)
-        
-        
+
+#Emergency Stop Direct Method
+async def process_error_dm(registry_manager, new_data):
+    try:   
+        unique_data = []
+        for line in new_data:
+            try:
+                device_name = line['DeviceName']
+                if device_name not in unique_data:
+                    unique_data.append(device_name)
+            except json.JSONDecodeError as json_err:
+                print(f"JSON decoding error: {str(json_err)} in line: {line}")
+            except KeyError as key_err:
+                print(f"Key error: {str(key_err)} in line: {line}")
+        for device_name in unique_data:
+            try:
+                payload = device_name
+                stop_method = CloudToDeviceMethod(method_name="emergency_stop", payload=payload, response_timeout_in_seconds=14)
+                registry_manager.invoke_device_method(DEVICE_ID, stop_method)
+                print(f"Success invoking method for device {device_name}")
+            except Exception as method_err:
+                print(f"Error invoking method for device {device_name}: {str(method_err)}")
+        return unique_data
+    except aiohttp.ClientResponseError as e:
+        # Handle specific HTTP errors
+        print(f"HTTP error: {e.status}, {e.message}")
+    except Exception as e:
+        print(f"Exception in process_error_dm: {str(e)}")
