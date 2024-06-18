@@ -2,8 +2,7 @@ import sys, aioconsole
 from manager import \
     IoTHubRegistryManager, \
     receive_twin_reported, \
-    twin_desired, json,\
-    clear_desired_twin,Twin, TwinProperties,\
+    clear_desired_twin,process_production, handle_c2d_message,\
     asyncio, os,load_dotenv,get_most_recent_blob,\
     BlobServiceClient, run_res_error, process_error_dm, datetime
 
@@ -23,6 +22,7 @@ async def main():
     kpi_last_processed_time = datetime.min 
     error_last_processed_time = datetime.min 
     err_last_positions = {}
+    kpi_last_positions = {}
     try:
         while True:        
             twin_reported = await receive_twin_reported(registry_manager, DEVICE_ID)
@@ -30,33 +30,38 @@ async def main():
             kpi_container_client = blob_service_client.get_container_client(kpi_container_name)
             error_container_name = ERROR_CONTAINER_NAME
             error_container_client = blob_service_client.get_container_client(error_container_name)
-            # try:
-            #     recent_kpi_blob = await get_most_recent_blob(kpi_container_client, kpi_last_processed_name, kpi_last_processed_time)
-            #     if recent_kpi_blob:
-            #         kpi_last_processed_name, kpi_last_processed_time = await process_production(recent_kpi_blob, registry_manager, twin_reported, kpi_container_client)
-            #     else:
-            #         print("no fresh blobs. last kpi_last_processed_name is ", kpi_last_processed_name)
-            # except Exception as e:
-            #     print(f"Exception: {str(e)}")
+            await run_res_error(registry_manager, 'Device 1')
+            
+            '''
+            try:
+                new_data1, kpi_last_processed_name, kpi_last_processed_time, kpi_last_positions = await get_most_recent_blob(kpi_container_client, kpi_last_processed_name, kpi_last_processed_time, kpi_last_positions)
+                if new_data1:
+                    await process_production(registry_manager, twin_reported, new_data1)
+                    print(f"New data from blob {kpi_last_processed_name} arrived")
+                else:
+                    print("No new data found")
+            except Exception as e:
+                print(f"Exception with Kpi Profuction Container process: {e}")
+
+            error_devices=[]
             try:
                 new_data, error_last_processed_name, error_last_processed_time, err_last_positions = await get_most_recent_blob(error_container_client, error_last_processed_name, error_last_processed_time, err_last_positions)
                 if new_data:
                     error_devices = await process_error_dm(registry_manager, new_data)
                     print(f"New data from blob {error_last_processed_name} arrived")
+                else:
+                    print("No new data found")
+                
+                #You can reset error on a device if it was stopped
+                if error_devices:
                     answer = "empty"
                     while answer.lower() != "no":
                         answer = await aioconsole.ainput(f"Reset error status for device(s) {error_devices}? (No/device name): ")
                         if answer.lower() != "no":
                             await run_res_error(registry_manager, answer)
-                else:
-                    print("No new data found")
-                
-                 
-                
-
             except Exception as ee:
                 print(f"Exception with Error Container process: {ee}")
-
+            '''
             await asyncio.sleep(60)
                         
 
