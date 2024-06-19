@@ -1,0 +1,37 @@
+   /*first*/
+SELECT 
+	DeviceName, ProductionRate, 
+    (SUM(GoodCount) * 100) / (SUM(GoodCount) + SUM(BadCount)) AS ProductionPercent
+INTO [production-output] 
+FROM [production-line-input]
+WHERE
+    ProductionStatus = 1
+GROUP BY
+	DeviceName, ProductionRate, 
+	TumblingWindow(minute, 5)
+HAVING 
+   (SUM(GoodCount) * 100) / (SUM(GoodCount) + SUM(BadCount)) < 90
+
+   /*second*/
+SELECT 
+	DeviceName, 
+    AVG(Temperature) AS AvgTemperature, MIN(Temperature) AS MinTemperature, MAX(Temperature) AS MaxTemperature
+INTO [temperature] 
+FROM [production-line-input]
+GROUP BY
+	DeviceName, 
+	HoppingWindow(minute, 5, 1)
+
+    /*third*/
+SELECT 
+	DeviceName,
+    COUNT(*) AS TotalErrors
+INTO [errors] 
+FROM [production-line-input]
+WHERE
+    IsDevErr='true'
+GROUP BY
+	DeviceName, 
+	TumblingWindow(minute, 1)
+HAVING
+    TotalErrors>3
