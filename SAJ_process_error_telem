@@ -1,0 +1,7 @@
+/*fourth*/
+SELECT 
+	DeviceName, DeviceError, WorkorderId, EventEnqueuedUtcTime
+INTO [IoT-Postman] 
+FROM  [Cirencester-End]
+WHERE
+    ProductionStatus = 3
