@@ -1,14 +1,14 @@
-import logging, os
+import logging, os, load_dotenv
 import azure.functions as func
 from azure.communication.email import EmailClient
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-
+load_dotenv()
 
 @app.route(route="IoT_Postman")
 def IoT_Postman(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        connection_string = os.getenv('EMAIL_SRV_CONNECTION_STRING')
+        connection_string = os.getenv("CONNECTION_STRING")
         if not connection_string:
             raise ValueError("Connection string is undefined.")
 
@@ -20,9 +20,9 @@ def IoT_Postman(req: func.HttpRequest) -> func.HttpResponse:
         email_body_parts = []
         email_body_details=[]
         for item in req_body:
-            device_name = item.get("DeviceName", "Unknown Device")
+            device_name = item.get("MachineName", "Unknown Device")
             device_error = item.get("DeviceError", "Unrecognised type of the error")
-            workorderId = item.get("WorkorderId", "Unknown ID")
+            workorderId = item.get("WorkorderId", "Unknown Workorder ID")
             eventEnqueuedUtcTime = item.get("EventEnqueuedUtcTime", "Unrecognised time")
 
             email_body_parts.append(f"{device_name} reported an error: {device_error}.")
@@ -63,3 +63,6 @@ def IoT_Postman(req: func.HttpRequest) -> func.HttpResponse:
         logging.error(f"Failed to send email. Error: {str(e)}")
         return func.HttpResponse(f"Failed to send email. Error: {str(e)}", status_code=500)
     
+
+
+   
