@@ -1,6 +1,6 @@
 /*fourth*/
 SELECT 
-	DeviceName, DeviceError, WorkorderId, EventEnqueuedUtcTime
+	MachineName, DeviceError, WorkorderId, EventEnqueuedUtcTime
 INTO [IoT-Postman] 
 FROM  [Cirencester-End]
 WHERE
